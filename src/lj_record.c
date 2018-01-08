@@ -1380,6 +1380,8 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
   IRType1 rbguard;
   cTValue *oldv;
 
+  if (!ix->start) ix->start = J->cur.nins;
+
   while (!tref_istab(ix->tab)) { /* Handle non-table lookup. */
     /* Never call raw lj_record_idx() on non-table. */
     lua_assert(ix->idxchain != 0);
@@ -1445,6 +1447,17 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     if (t == IRT_NIL && ix->idxchain && lj_record_mm_lookup(J, ix, MM_index))
       goto handlemm;
     if (irtype_ispri(t)) res = TREF_PRI(t);  /* Canonicalize primitives. */
+
+    /* So, having done all that, do we want to compile this as a
+    ** "sealed" constant access? 
+    */
+    if (tref_isk(ix->key)) {
+      IRRef valk = lj_record_constify(J, oldv);
+      if (ix->start) lj_ir_rollback(J, ix->start);
+      emitir(IRTG(IR_EQ, IRT_TAB), ix->tab, lj_record_constify(J, &ix->tabv));
+      return valk;
+    }
+
     return res;
   } else {  /* Indexed store. */
     GCtab *mt = tabref(tabV(&ix->tabv)->metatable);
@@ -2055,6 +2068,7 @@ void lj_record_ins(jit_State *J)
   op = bc_op(ins);
   ra = bc_a(ins);
   ix.val = 0;
+  ix.start = 0;
   switch (bcmode_a(op)) {
   case BCMvar:
     copyTV(J->L, rav, &lbase[ra]); ix.val = ra = getslot(J, ra); break;
